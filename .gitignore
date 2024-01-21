@@ -1,0 +1,11 @@
+Clases/
+data/
+Dataset/
+Dataset2/
+gadm/
+Paper_Incendios/
+Zoom/
+r_forest.py
+data_modis.R
+data_modis2.R
+test_modis.R

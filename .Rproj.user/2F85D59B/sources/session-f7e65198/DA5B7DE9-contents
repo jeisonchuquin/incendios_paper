@@ -1,0 +1,167 @@
+library(terra)
+library(luna)
+
+# lists all products that are currently searchable
+prod <- getProducts()
+head(prod)
+
+# to find the MODIS products
+modis <- getProducts("^MOD|^MYD|^MCD")
+head(modis)
+
+# definimos el producto
+product <- "MCD64A1"
+
+productInfo(product)
+
+# definimos fechas de interes
+start <- "2020-08-01"
+end <- "2020-08-30"
+
+# area de interes de estudio
+ecu <- geodata::gadm("Ecuador", level=1, path=".")
+ecu
+
+# area of interest
+i <- ecu$NAME_1 == "Pichincha"
+aoi <- ecu[i,]
+
+
+plot(ecu, col="light gray")
+lines(aoi, col="red", lwd=2)
+
+# data disponible
+mf <- luna::getModis(product, start, end, aoi=aoi, download = FALSE)
+mf
+
+
+# descarga de datos
+datadir <- file.path('./Dataset')
+
+mf <- luna::getNASA(product, start, end, aoi=aoi, download=TRUE,
+                    path=datadir, username='jeisonf8', password='Nvidia2022@gtx')
+mf
+
+# Creamos objetos raster
+r <- rast(mf[1])
+r
+
+# coordinate reference system
+crs(r)
+dim(r)
+nrow(r)
+ncol(r)
+# Number of layers (bands)
+nlyr(r)
+ncell(r)
+# spatial resolution
+res(r)
+# nombre de layers o bandas que posee
+names(r)
+
+# imagenes
+plotRGB(r, r = 2, g = 2, b = 3)
+# Disappointing? apply some stretching; see `?plotRGB` for more options
+plotRGB(r, r = 2, g = 2, b = 3, stretch="lin")
+plotRGB(r$sur_refl_b01, r=1, g=1, b=1, stretch='lin')
+plot(r)
+
+
+# quality control para dias nubosos
+# cada hdf tiene su capa de qa para este proposito
+# definimos los bits y lo que queremos excluir
+from <- c(1,2)
+to   <- c(1,2)
+reject <- c("0", "0")
+qa_bits <- cbind(from, to, reject)
+qa_bits
+# graficamos la banda de calidad
+qc <- r[[3]]
+plot(qc, main = "Quality")
+
+# pasamos los bits que no queremos y obtenemos los pixeles que queremos
+quality_mask <- modis_mask(qc, 16, qa_bits)
+plot(quality_mask, main="Quality mask")
+
+# con esos pixeles idnetificados que quermos, le pasamos a todaslas bandas
+rmask <- mask(r, quality_mask)
+plotRGB(rmask, r = 2, g = 1, b = 4, main='sin nubes', stretch="lin")
+plotRGB(r, r = 2, g = 2, b = 4, main='original', stretch="lin")
+plot(rmask) # lo que está en blanco se eliminó
+
+# guardamos
+mf <- file.path(datadir, "modis_qualmasked.tif")
+
+writeRaster(rmask, mf, overwrite=TRUE)
+
+
+# Obtenemos el NVDI del aoi
+library(geodata)
+ecu <- gadm(country="Ecuador", level=1, path=".")
+pol <- ecu[ecu$NAME_1 == "Pichincha", ]
+
+# sistema de referencia
+mf <- file.path(datadir, "modis_qualmasked.tif")
+rmask <- rast(mf)
+plot(rmask)
+prj <- crs(rmask)
+prj
+
+poly <- project(pol, prj)
+
+# recortamos la imagen con el polugono transformado
+rcrop <- crop(rmask, poly)
+
+plotRGB(rcrop, r = 2, g = 1, b = 4,  main = "False color composite", stretch = "lin" )
+lines(poly, col="blue")
+
+# si hay valores fuera de 0 y 1, los anula
+r <- clamp(rcrop, 0, 1)
+
+# calculamos ndiv: (NIR-Red/NIR+Red)
+ndvi <- (r[[2]] - r[[1]]) /(r[[2]] + r[[1]])
+plot(ndvi, main="NDVI")
+
+data_burn <- as.data.frame(r$`"Burn Date"`)
+coords <- crds(r$`"Burn Date"`)
+
+data_final <- cbind(coords, data_burn)
+
+library(geodata)
+ecu <- gadm(country="Ecuador", level=1, path=".")
+pol <- ecu[ecu$NAME_1 == "Pichincha", ]
+
+
+
+rmask <- rast(mf)
+plot(r$`"Burn Date"`)
+prj <- crs(r$`"Burn Date"`)
+prj
+
+poly <- project(pol, prj)
+
+
+rcrop <- crop(r$`"Burn Date"`, poly)
+
+plotRGB(rcrop, r = 1, g = 1, b = 1,  main = "False color composite", stretch = "lin" )
+lines(poly, col="blue")
+plot(rcrop)
+
+
+library(tidyverse)
+data_final_ <- data_final %>% filter(`"Burn Date"` > 0)
+plot(data_final_$x, data_final_$y)
+ggplot(data_final_, aes(x=x, y=y, colour = factor(`"Burn Date"`))) +
+  geom_point()
+
+data_final_$x/100000
+data_final_$y/100000
+
+
+plot(ecu)
+points(data_final_$x/100000, data_final_$y/100000)
+
+
+
+
+
